@@ -1,20 +1,5 @@
--- =============================================================================
---  KiciaHook - open-source RIVALS script
--- =============================================================================
---  This is a readable, runnable reconstruction of the KiciaHook feature set for
---  RIVALS, rebuilt by pattern-matching a public deobfuscation against the live
---  game, with additional features and a different UI on top.
--- =============================================================================
 (function()
 
--- -----------------------------------------------------------------------------
--- Global environment resolution
--- -----------------------------------------------------------------------------
--- A candidate env only wins if a key written to it is visible as a bare global
--- read from this script. Solara-tier executors ship a getgenv whose table is
--- disconnected from the real environment (sUNC: "the function environment of
--- getgenv should not be the result of it"), which would otherwise strand the
--- executor stubs below in a dead table nothing can see.
 local function ResolveGlobalEnv()
     local candidates = {}
     if type(getgenv) == 'function' then
@@ -93,10 +78,7 @@ do
         isfunctionhooked  = function() return false end,
         restorefunction   = _noop,
     }
-    -- Every name that got a stub (or was found missing/broken) lands in
-    -- _stubbed. Stubs keep bare calls from hard-erroring, but they also make
-    -- `type(fn) == 'function'` checks lie -- KiciaHookCaps below is the only
-    -- honest way to ask "does this executor really support X".
+  
     local _stubbed = {}
     for name, stub in pairs(_stubs) do
         if rawget(_genv, name) == nil then
@@ -105,10 +87,6 @@ do
         end
     end
 
-    -- RIVALS' anti-cheat treats hookfunction itself as a detector surface, so we
-    -- never live-probe the executor's implementation while that experience is
-    -- active. Since this build only runs in RIVALS the probe is effectively
-    -- always skipped; the check is kept so the reason stays visible.
     if game.GameId ~= 6035872082 and _genv.hookfunction ~= _stubs.hookfunction then
         local ok = pcall(_genv.hookfunction, function() end, function() end)
         if not ok then
@@ -127,16 +105,12 @@ do
         _stubbed.firetouchinterest = true
     end
 
-    -- Globals used by the hook that get no stub (call sites handle nil), but
-    -- that support checks still need to know about.
     for _, name in ipairs({ 'queue_on_teleport', 'sethiddenproperty', 'gethiddenproperty', 'getrenv', 'getcallingscript' }) do
         if type(_genv[name]) ~= 'function' then
             _stubbed[name] = true
         end
     end
 
-    -- A getgenv that lost the env probe above is semantically broken even if it
-    -- exists (it returns a table detached from the environment).
     if type(getgenv) ~= 'function' then
         _stubbed.getgenv = true
     else
@@ -146,10 +120,6 @@ do
         end
     end
 
-    -- debug.* executor extensions live inside the standard debug table, so the
-    -- global stub pass above never sees them, and the resolved env table is not
-    -- guaranteed to proxy dotted reads. Probe them with bare reads here so
-    -- Caps.has answers honestly for names like 'debug.getupvalues'.
     local _debugExt = {}
     for _, name in ipairs({ 'getupvalue', 'getupvalues', 'setupvalue', 'getconstant', 'getconstants', 'setconstant', 'getprotos', 'getproto', 'getstack', 'info' }) do
         local ok, value = pcall(function() return debug[name] end)
@@ -186,24 +156,15 @@ do
     }
 end
 
--- -----------------------------------------------------------------------------
--- Supported experiences
--- -----------------------------------------------------------------------------
--- This open-source build ships RIVALS only. GameId (not PlaceId) is used so
--- every place in the universe -- lobby, ranked, casual -- matches one entry.
 local Games = {
     ['RIVALS'] = { ID = 6035872082, State = true },
+    ['COUNTERBLOX'] = { ID = 301549746, State = true },
+    ['SNIPERARENA'] = { ID = 122446657157717, state = true },
+    ['OVERKILL'] = { ID = 124842176624983, state = true },
 }
 
 repeat task.wait() until game:IsLoaded()
 
--- Elevate thread identity to 8 before loading the bundled Obsidian UI library.
--- Roblox's capability system gates some Instance writes behind the Plugin
--- capability; identity 8 carries the full capability bitmask (Plugin included).
--- Without this, the loaded chunk and any persistent UI state it creates
--- (Library.ScreenGui, NotificationArea) inherit an identity whose property
--- writes can throw "lacking capability Plugin" when the Notify path runs
--- FillInstance against a fresh Frame.
 local function __KiciaHookElevateIdentity()
     if type(setthreadidentity) == 'function' then
         pcall(setthreadidentity, 8)
@@ -211,13 +172,6 @@ local function __KiciaHookElevateIdentity()
 end
 __KiciaHookElevateIdentity()
 
--- -----------------------------------------------------------------------------
--- Shared module registry
--- -----------------------------------------------------------------------------
--- The build script concatenates every module into one file. Each one is emitted
--- as `__kicia_hook_shared.<name> = function() ... end` at the injection marker
--- below, and RequireSharedModule runs it once and caches the result -- the same
--- contract as Roblox's require(), without needing real ModuleScripts.
 local __kicia_hook_shared = {}
 
 local __shared_module_cache = {}
@@ -333,8 +287,7 @@ return Lucide
 end
 
 __kicia_hook_shared.obsidian_library = function()
--- Vendored from Obsidian b4523805727561499b5b8206e14590371923f343.
--- Local changes: GetMouse removed, Lucide icon data bundled inline, standalone modifier keybinds restored, inline type annotations removed.
+
 local cloneref = (cloneref or clonereference or function(instance)
     return instance
 end)
